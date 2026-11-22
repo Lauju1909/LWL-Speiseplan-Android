@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark" data-font="normal">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>LWL Speiseplan – Mensa Soest</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Direkt zum Speiseplan springen</a>
+
+  <!-- ARIA Live-Regionen für TalkBack / Screenreader -->
+  <div id="sr-live-polite" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <div id="sr-live-assertive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
+  <header class="app-header" role="banner">
+    <div class="header-top">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">🍽️</span>
+        <div>
+          <h1 class="app-title">LWL Speiseplan</h1>
+          <p class="app-subtitle">Mensa Soest · Ohne Anmeldung</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="btn-read-aloud" class="icon-btn" onclick="readCurrentPlanAloud()" aria-label="Aktuellen Speiseplan vorlesen">
+          <span aria-hidden="true">🔊</span>
+          <span class="btn-label">Vorlesen</span>
+        </button>
+        <button type="button" id="btn-refresh" class="icon-btn primary" onclick="refreshCanteenPlans(false)" aria-label="Neuesten Speiseplan aus dem Internet laden">
+          <span aria-hidden="true">🔄</span>
+          <span class="btn-label">Aktualisieren</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="status-bar" class="status-bar" role="status" aria-live="polite">
+      Lade aktuellen Speiseplan…
+    </div>
+  </header>
+
+  <main id="main-content" class="app-main" role="main" tabindex="-1">
+    <!-- Wochen-Steuerung -->
+    <section class="control-card" aria-label="Wochenauswahl">
+      <div class="week-nav-row">
+        <button type="button" class="nav-arrow-btn" onclick="changeWeek(-1)" aria-label="Vorherige Woche">
+          <span aria-hidden="true">◀</span> Zurück
+        </button>
+        <label for="week-select" class="sr-only">Kalenderwoche auswählen</label>
+        <select id="week-select" class="week-select" onchange="selectWeek(this.value, true)" aria-label="Kalenderwoche auswählen"></select>
+        <button type="button" class="nav-arrow-btn" onclick="changeWeek(1)" aria-label="Nächste Woche">
+          Weiter <span aria-hidden="true">▶</span>
+        </button>
+      </div>
+      <div id="week-quick-pills" class="pill-row" role="group" aria-label="Schnellwahl Kalenderwochen"></div>
+    </section>
+
+    <!-- Tages- & Menü-Filter -->
+    <section class="control-card" aria-label="Tages- und Menüfilter">
+      <div class="filter-group">
+        <span class="filter-label" id="day-filter-label">Tag:</span>
+        <div id="day-filter-bar" class="pill-row" role="tablist" aria-labelledby="day-filter-label"></div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label" id="diet-filter-label">Menü-Ansicht:</span>
+        <div id="diet-filter-bar" class="pill-row" role="group" aria-labelledby="diet-filter-label"></div>
+      </div>
+    </section>
+
+    <!-- Speiseplan-Inhalt -->
+    <section id="canteen-container" class="days-list" aria-label="Speiseplan der ausgewählten Woche">
+      <div class="empty-card">
+        <p>Speisepläne werden geladen…</p>
+      </div>
+    </section>
+
+    <!-- Allergen-Legende & Darstellungs-Optionen -->
+    <section class="control-card" aria-label="Barrierefreiheit und Allergen-Legende">
+      <div class="a11y-row">
+        <button type="button" id="btn-theme" class="pill-btn" onclick="cycleTheme()" aria-label="Farbschema wechseln">
+          <span aria-hidden="true">🎨</span> Design: Dunkel
+        </button>
+        <button type="button" id="btn-font" class="pill-btn" onclick="cycleFontSize()" aria-label="Schriftgröße ändern">
+          <span aria-hidden="true">🔤</span> Schrift: Normal
+        </button>
+      </div>
+
+      <details class="allergen-details">
+        <summary class="allergen-summary">Allergene &amp; Zusatzstoffe anzeigen</summary>
+        <dl class="allergen-grid">
+          <div><dt>A</dt><dd>Soja</dd></div>
+          <div><dt>B</dt><dd>Erdnüsse</dd></div>
+          <div><dt>C</dt><dd>Sellerie</dd></div>
+          <div><dt>D</dt><dd>Senf</dd></div>
+          <div><dt>E</dt><dd>Eier</dd></div>
+          <div><dt>F</dt><dd>Fisch</dd></div>
+          <div><dt>G</dt><dd>Gluten</dd></div>
+          <div><dt>H</dt><dd>Sesamsamen</dd></div>
+          <div><dt>I</dt><dd>Schwefeldioxid / Sulfite</dd></div>
+          <div><dt>K</dt><dd>Krebstiere</dd></div>
+          <div><dt>L</dt><dd>Lupinen</dd></div>
+          <div><dt>M</dt><dd>Milch / Milchprodukte</dd></div>
+          <div><dt>S</dt><dd>Schalenfrüchte (Nüsse)</dd></div>
+          <div><dt>W</dt><dd>Weichtiere</dd></div>
+          <div><dt>1</dt><dd>Farbstoff</dd></div>
+          <div><dt>2</dt><dd>Konservierungsstoff</dd></div>
+          <div><dt>3</dt><dd>Antioxidationsmittel</dd></div>
+          <div><dt>4</dt><dd>Geschmacksverstärker</dd></div>
+          <div><dt>5</dt><dd>Geschwefelt</dd></div>
+          <div><dt>8</dt><dd>Phosphat</dd></div>
+          <div><dt>9</dt><dd>Süßungsmittel</dd></div>
+          <div><dt>10</dt><dd>Milcheiweiß</dd></div>
+        </dl>
+      </details>
+    </section>
+  </main>
+
+  <footer class="app-footer" role="contentinfo">
+    <p>LWL Speiseplan App · Mensa Von-Vincke-Schule &amp; BBW Soest · Keine Anmeldung erforderlich</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

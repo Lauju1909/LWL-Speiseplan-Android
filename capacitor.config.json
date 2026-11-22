@@ -1,0 +1,13 @@
+{
+  "appId": "de.lwl.speiseplan",
+  "appName": "LWL Speiseplan",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

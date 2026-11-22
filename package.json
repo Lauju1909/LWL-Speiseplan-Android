@@ -1,0 +1,17 @@
+{
+  "name": "lwl-speiseplan-android",
+  "version": "1.0.0",
+  "description": "Barrierefreie Android-App nur für die Mensa-Speisepläne (LWL-Von-Vincke-Schule & BBW Soest) – ohne Anmeldung.",
+  "private": true,
+  "scripts": {
+    "cap:sync": "npx cap sync android",
+    "android:build": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/haptics": "^8.0.2"
+  }
+}
