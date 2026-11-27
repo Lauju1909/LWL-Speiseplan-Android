@@ -1,6 +1,6 @@
 {
   "name": "lwl-speiseplan-android",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Barrierefreie Android-App nur für die Mensa-Speisepläne (LWL-Von-Vincke-Schule & BBW Soest) – ohne Anmeldung.",
   "private": true,
   "scripts": {

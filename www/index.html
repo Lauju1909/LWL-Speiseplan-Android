@@ -1,123 +1,270 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="dark" data-font="normal">
+<html lang="de">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0f172a">
-  <title>LWL Speiseplan – Mensa Soest</title>
+  <title>LWL Speiseplan – Mensa Soest (Barrierefrei)</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <a href="#main-content" class="skip-link">Direkt zum Speiseplan springen</a>
+<body class="theme-light font-normal" id="app-body">
 
-  <!-- ARIA Live-Regionen für TalkBack / Screenreader -->
-  <div id="sr-live-polite" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <!-- Live-Regionen für TalkBack / Screenreader Mitteilungen -->
+  <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <div id="sr-live-assertive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
 
+  <!-- Schnellsprunglinks -->
+  <nav class="skip-links" aria-label="Schnellnavigation">
+    <a href="#main-nav-tabs" class="skip-link">Zur Menüauswahl springen (Tasten 1-2)</a>
+    <a href="#canteen-day-filter-bar" class="skip-link">Zur Tagesauswahl springen</a>
+    <a href="#view-content-area" class="skip-link">Direkt zum Hauptinhalt springen</a>
+  </nav>
+
+  <!-- =========================================================================
+       HEADER / KOPFZEILE (IDENTISCH ZUM STUNDENPLAN)
+       ========================================================================= -->
   <header class="app-header" role="banner">
-    <div class="header-top">
+    <div class="header-content">
       <div class="brand">
-        <span class="brand-icon" aria-hidden="true">🍽️</span>
-        <div>
-          <h1 class="app-title">LWL Speiseplan</h1>
-          <p class="app-subtitle">Mensa Soest · Ohne Anmeldung</p>
+        <span class="app-icon emoji-icon" aria-hidden="true">🍽️</span>
+        <div class="brand-text">
+          <h1>LWL Speiseplan</h1>
+          <span class="school-tag">Mensa Soest • Ohne Anmeldung</span>
         </div>
       </div>
-      <div class="header-actions">
-        <button type="button" id="btn-read-aloud" class="icon-btn" onclick="readCurrentPlanAloud()" aria-label="Aktuellen Speiseplan vorlesen">
-          <span aria-hidden="true">🔊</span>
-          <span class="btn-label">Vorlesen</span>
+      <div class="header-controls">
+        <span id="live-sync-indicator" class="today-badge" style="border: 2px solid var(--accent-ok); background: rgba(21, 128, 61, 0.15);" aria-label="Synchronisationsstatus">
+          <span class="emoji-icon" aria-hidden="true">🟢 </span><span id="sync-status-text">Speiseplan bereit</span>
+        </span>
+        <button type="button" class="btn btn-primary" id="btn-header-refresh" onclick="refreshCanteenData(false)" title="Speiseplan jetzt aktualisieren (Taste A)">
+          <span class="emoji-icon" aria-hidden="true">🔄</span>
+          <span>Aktualisieren (A)</span>
         </button>
-        <button type="button" id="btn-refresh" class="icon-btn primary" onclick="refreshCanteenPlans(false)" aria-label="Neuesten Speiseplan aus dem Internet laden">
-          <span aria-hidden="true">🔄</span>
-          <span class="btn-label">Aktualisieren</span>
+        <button type="button" class="btn btn-tts" onclick="readCanteenSummary()" title="Speiseplan laut vorlesen (Taste V)">
+          <span class="emoji-icon" aria-hidden="true">🔊</span>
+          <span>Vorlesen (V)</span>
         </button>
       </div>
-    </div>
-
-    <div id="status-bar" class="status-bar" role="status" aria-live="polite">
-      Lade aktuellen Speiseplan…
     </div>
   </header>
 
-  <main id="main-content" class="app-main" role="main" tabindex="-1">
-    <!-- Wochen-Steuerung -->
-    <section class="control-card" aria-label="Wochenauswahl">
-      <div class="week-nav-row">
-        <button type="button" class="nav-arrow-btn" onclick="changeWeek(-1)" aria-label="Vorherige Woche">
-          <span aria-hidden="true">◀</span> Zurück
-        </button>
-        <label for="week-select" class="sr-only">Kalenderwoche auswählen</label>
-        <select id="week-select" class="week-select" onchange="selectWeek(this.value, true)" aria-label="Kalenderwoche auswählen"></select>
-        <button type="button" class="nav-arrow-btn" onclick="changeWeek(1)" aria-label="Nächste Woche">
-          Weiter <span aria-hidden="true">▶</span>
-        </button>
-      </div>
-      <div id="week-quick-pills" class="pill-row" role="group" aria-label="Schnellwahl Kalenderwochen"></div>
-    </section>
+  <!-- =========================================================================
+       HAUPTNAVIGATION (2 REITER: SPEISEPLAN & EINSTELLUNGEN)
+       ========================================================================= -->
+  <nav class="main-nav" aria-label="Hauptnavigation">
+    <div class="nav-tabs" id="main-nav-tabs" role="tablist">
+      <button id="tab-canteen" class="tab-btn active" role="tab" aria-selected="true" aria-controls="view-canteen" onclick="switchTab('canteen')" tabindex="0">
+        <span class="tab-key-hint" aria-hidden="true">1</span>
+        <span><span class="emoji-icon" aria-hidden="true">🍽️ </span><strong>Mensa &amp; Speisepläne</strong></span>
+      </button>
+      <button id="tab-settings" class="tab-btn" role="tab" aria-selected="false" aria-controls="view-settings" onclick="switchTab('settings')" tabindex="-1">
+        <span class="tab-key-hint" aria-hidden="true">2</span>
+        <span><span class="emoji-icon" aria-hidden="true">⚙️ </span><strong>Einstellungen</strong></span>
+      </button>
+    </div>
+  </nav>
 
-    <!-- Tages- & Menü-Filter -->
-    <section class="control-card" aria-label="Tages- und Menüfilter">
-      <div class="filter-group">
-        <span class="filter-label" id="day-filter-label">Tag:</span>
-        <div id="day-filter-bar" class="pill-row" role="tablist" aria-labelledby="day-filter-label"></div>
-      </div>
-      <div class="filter-group">
-        <span class="filter-label" id="diet-filter-label">Menü-Ansicht:</span>
-        <div id="diet-filter-bar" class="pill-row" role="group" aria-labelledby="diet-filter-label"></div>
-      </div>
-    </section>
+  <!-- =========================================================================
+       HAUPTINHALTSBEREICH
+       ========================================================================= -->
+  <main class="main-container" id="view-content-area" role="main">
 
-    <!-- Speiseplan-Inhalt -->
-    <section id="canteen-container" class="days-list" aria-label="Speiseplan der ausgewählten Woche">
-      <div class="empty-card">
-        <p>Speisepläne werden geladen…</p>
-      </div>
-    </section>
+    <!-- =======================================================================
+         REITER 1: MENSA & SPEISEPLÄNE (1:1 WIE IM STUNDENPLAN)
+         ======================================================================= -->
+    <div id="view-canteen" class="view-panel active" role="tabpanel" aria-labelledby="tab-canteen">
 
-    <!-- Allergen-Legende & Darstellungs-Optionen -->
-    <section class="control-card" aria-label="Barrierefreiheit und Allergen-Legende">
-      <div class="a11y-row">
-        <button type="button" id="btn-theme" class="pill-btn" onclick="cycleTheme()" aria-label="Farbschema wechseln">
-          <span aria-hidden="true">🎨</span> Design: Dunkel
-        </button>
-        <button type="button" id="btn-font" class="pill-btn" onclick="cycleFontSize()" aria-label="Schriftgröße ändern">
-          <span aria-hidden="true">🔤</span> Schrift: Normal
-        </button>
+      <div class="banner-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <h2 class="banner-title" id="canteen-view-title">Mensa &amp; Speisepläne</h2>
+            <p class="banner-subtitle">Wöchentlicher Speiseplan der Mensa im LWL-Bildungszentrum Soest (Von-Vincke-Schule, BBW &amp; Berufskolleg).</p>
+          </div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-primary" onclick="refreshCanteenData(false)" id="btn-sync-canteen" aria-label="Speiseplan jetzt aus dem Internet aktualisieren">
+              <span class="emoji-icon" aria-hidden="true">🔄 </span><strong>Aktualisieren (A)</strong>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="readCanteenSummary()" aria-label="Heutigen Speiseplan vorlesen">
+              <span class="emoji-icon" aria-hidden="true">🔊 </span><span>Speiseplan vorlesen (V)</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      <details class="allergen-details">
-        <summary class="allergen-summary">Allergene &amp; Zusatzstoffe anzeigen</summary>
-        <dl class="allergen-grid">
-          <div><dt>A</dt><dd>Soja</dd></div>
-          <div><dt>B</dt><dd>Erdnüsse</dd></div>
-          <div><dt>C</dt><dd>Sellerie</dd></div>
-          <div><dt>D</dt><dd>Senf</dd></div>
-          <div><dt>E</dt><dd>Eier</dd></div>
-          <div><dt>F</dt><dd>Fisch</dd></div>
-          <div><dt>G</dt><dd>Gluten</dd></div>
-          <div><dt>H</dt><dd>Sesamsamen</dd></div>
-          <div><dt>I</dt><dd>Schwefeldioxid / Sulfite</dd></div>
-          <div><dt>K</dt><dd>Krebstiere</dd></div>
-          <div><dt>L</dt><dd>Lupinen</dd></div>
-          <div><dt>M</dt><dd>Milch / Milchprodukte</dd></div>
-          <div><dt>S</dt><dd>Schalenfrüchte (Nüsse)</dd></div>
-          <div><dt>W</dt><dd>Weichtiere</dd></div>
-          <div><dt>1</dt><dd>Farbstoff</dd></div>
-          <div><dt>2</dt><dd>Konservierungsstoff</dd></div>
-          <div><dt>3</dt><dd>Antioxidationsmittel</dd></div>
-          <div><dt>4</dt><dd>Geschmacksverstärker</dd></div>
-          <div><dt>5</dt><dd>Geschwefelt</dd></div>
-          <div><dt>8</dt><dd>Phosphat</dd></div>
-          <div><dt>9</dt><dd>Süßungsmittel</dd></div>
-          <div><dt>10</dt><dd>Milcheiweiß</dd></div>
-        </dl>
-      </details>
-    </section>
+      <!-- STATUS- & QUELLEN-BANNER -->
+      <div id="canteen-status-banner" class="canteen-info-banner" role="status" aria-live="polite" style="margin-bottom: 20px; padding: 12px 16px; background: var(--bg-surface-elevated); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <!-- Quelle & Aktualitätsanzeige -->
+      </div>
+
+      <!-- WOCHEN- & TAGESAUSWAHL -->
+      <div class="canteen-controls-wrapper" role="region" aria-label="Mensa Filter und Wochenauswahl" style="margin-bottom: 24px; padding: 14px 18px; background: var(--bg-surface-elevated); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 14px;">
+        <div class="canteen-control-group" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <label for="canteen-week-select" class="field-label" style="font-size: 15px; font-weight: bold; color: var(--text-primary); display: inline-flex; align-items: center; gap: 6px;">
+            <span class="emoji-icon" aria-hidden="true">📅 </span><strong>Woche auswählen:</strong>
+          </label>
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-secondary" style="padding: 7px 12px; font-size: 14px;" onclick="changeCanteenWeek(-1)" aria-label="Vorherige Kalenderwoche aufrufen">
+              <span class="emoji-icon" aria-hidden="true">◀️ </span>Vorherige
+            </button>
+            <select id="canteen-week-select" class="form-control" onchange="setCanteenWeek(this.value, true)" style="display: inline-block; width: auto; min-width: 260px; max-width: 100%; padding: 8px 12px; font-size: 14.5px; font-weight: 600; border-radius: var(--radius-sm); border: 2px solid var(--accent-info); background: var(--bg-surface); color: var(--text-primary);" aria-label="Speiseplan-Woche auswählen">
+              <!-- Dynamisch befüllt -->
+            </select>
+            <button type="button" class="btn btn-secondary" style="padding: 7px 12px; font-size: 14px;" onclick="changeCanteenWeek(1)" aria-label="Nächste Kalenderwoche aufrufen">
+              Nächste<span class="emoji-icon" aria-hidden="true"> ▶️</span>
+            </button>
+          </div>
+          <div id="canteen-week-quick-nav" style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <!-- Schnellfilter: Vorige, Diese Woche, Nächste Woche -->
+          </div>
+        </div>
+        <div class="canteen-day-filter" role="tablist" aria-label="Wochentag filtern" id="canteen-day-filter-bar" style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <!-- Buttons für Ganze Woche, Mo, Di, Mi, Do, Fr -->
+        </div>
+      </div>
+
+      <!-- SPEISEPLAN-KARTEN -->
+      <section id="canteen-days-container" aria-live="polite" aria-label="Tagesmenüs der Mensa">
+        <!-- Dynamisch befüllt -->
+      </section>
+
+    </div>
+
+    <!-- =======================================================================
+         REITER 2: EINSTELLUNGEN (ALLE EINSTELLUNGEN GEBÜNDELT WIE IM STUNDENPLAN)
+         ======================================================================= -->
+    <div id="view-settings" class="view-panel" role="tabpanel" aria-labelledby="tab-settings">
+
+      <div class="banner-header">
+        <h2 class="banner-title">Einstellungen</h2>
+        <p class="banner-subtitle">Barrierefreiheit, Farben, Schriftgröße, Sprachausgabe und Speiseplan-Filter anpassen.</p>
+      </div>
+
+      <!-- 1. BARRIEREFREIHEIT & DESIGN -->
+      <section class="section-card" aria-labelledby="a11y-cfg-heading">
+        <h3 id="a11y-cfg-heading" style="font-size: var(--font-size-lg); margin-bottom: 6px;">
+          <span class="emoji-icon" aria-hidden="true">👁️ </span>Barrierefreiheit &amp; Kontraste (WCAG 2.2 AAA)
+        </h3>
+        <p class="field-hint">Optimiere Farben, Schriftgrößen und Sprachausgabe für deine Sehbedürfnisse:</p>
+
+        <div class="accessible-form" style="margin-top: 16px;">
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="cfg-theme" class="field-label"><strong>Farbschema &amp; Kontrast:</strong></label>
+              <select id="cfg-theme" class="large-select" onchange="saveSettings(event)">
+                <option value="theme-light">Standard Hell (Weiß / Dunkelblau)</option>
+                <option value="theme-dark">Dunkelmodus (Schonend für die Augen)</option>
+                <option value="theme-high-contrast">Gelb auf Schwarz (Maximaler Kontrast für Sehbehinderte)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfg-font-size" class="field-label"><strong>Schriftgröße:</strong></label>
+              <select id="cfg-font-size" class="large-select" onchange="saveSettings(event)">
+                <option value="font-normal">Normal (18 Pixel - Standard)</option>
+                <option value="font-large">Groß (22 Pixel - Gut lesbar)</option>
+                <option value="font-xlarge">Sehr groß (26 Pixel - Für Sehbehinderte)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="cfg-tts-rate" class="field-label"><strong>Sprachausgabe: Sprechtempo:</strong></label>
+              <select id="cfg-tts-rate" class="large-select" onchange="saveSettings(event)">
+                <option value="0.8">0.8x (Langsam &amp; sehr deutlich)</option>
+                <option value="1.0" selected>1.0x (Normal)</option>
+                <option value="1.2">1.2x (Zügig)</option>
+                <option value="1.5">1.5x (Schnell für Profis)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfg-diet-filter" class="field-label"><strong>Angezeigte Menüs im Speiseplan:</strong></label>
+              <select id="cfg-diet-filter" class="large-select" onchange="saveSettings(event)">
+                <option value="all">Alle 3 Menüs anzeigen (Standard)</option>
+                <option value="menu1">Nur Menü 1 (Vollkost)</option>
+                <option value="menu2">Nur Menü 2 (Muslimische Kost / Ohne Schwein)</option>
+                <option value="menu3">Nur Menü 3 (Vegetarisch)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group" style="display: flex; flex-direction: column; justify-content: center; gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="cfg-tts" checked onchange="saveSettings(event)" style="width: 22px; height: 22px;">
+                <span><strong>Sprachausgabe (TTS) aktivierbar</strong></span>
+              </label>
+            </div>
+            <div class="form-group" style="display: flex; flex-direction: column; justify-content: center; gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="cfg-text-only" onchange="saveSettings(event)" style="width: 22px; height: 22px;">
+                <span><strong>Reiner Textmodus (0 Emojis für TalkBack / Braillezeile)</strong></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. ALLERGEN- & ZUSATZSTOFF-LEGENDE -->
+      <section class="section-card" aria-labelledby="allergen-cfg-heading">
+        <h3 id="allergen-cfg-heading" style="font-size: var(--font-size-lg); margin-bottom: 8px;">
+          <span class="emoji-icon" aria-hidden="true">ℹ️ </span>Allergene &amp; Zusatzstoffe (Legende)
+        </h3>
+        <details class="accessible-accordion">
+          <summary class="accordion-summary">Bedeutung der Buchstaben und Nummern im Speiseplan anzeigen</summary>
+          <div class="accordion-content">
+            <ul style="list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; padding: 0;">
+              <li><strong>A:</strong> Soja</li>
+              <li><strong>B:</strong> Erdnüsse</li>
+              <li><strong>C:</strong> Sellerie</li>
+              <li><strong>D:</strong> Senf</li>
+              <li><strong>E:</strong> Eier</li>
+              <li><strong>F:</strong> Fisch</li>
+              <li><strong>G:</strong> Gluten</li>
+              <li><strong>H:</strong> Sesamsamen</li>
+              <li><strong>I:</strong> Schwefeldioxid / Sulfite</li>
+              <li><strong>K:</strong> Krebstiere</li>
+              <li><strong>L:</strong> Lupinen</li>
+              <li><strong>M:</strong> Milch / Milchprodukte</li>
+              <li><strong>S:</strong> Schalenfrüchte (Nüsse)</li>
+              <li><strong>W:</strong> Weichtiere</li>
+              <li><strong>1:</strong> Farbstoff</li>
+              <li><strong>2:</strong> Konservierungsstoff</li>
+              <li><strong>3:</strong> Antioxidationsmittel</li>
+              <li><strong>4:</strong> Geschmacksverstärker</li>
+              <li><strong>5:</strong> Geschwefelt</li>
+              <li><strong>8:</strong> Phosphat</li>
+              <li><strong>9:</strong> Süßungsmittel</li>
+              <li><strong>10:</strong> Milcheiweiß</li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <!-- 3. SYNCHRONISATION & APP-INFO -->
+      <section class="section-card" aria-labelledby="sync-cfg-heading">
+        <h3 id="sync-cfg-heading" style="font-size: var(--font-size-lg); margin-bottom: 8px;">
+          <span class="emoji-icon" aria-hidden="true">🔄 </span>Speiseplan-Synchronisation &amp; App-Info
+        </h3>
+        <div style="background: var(--bg-surface-elevated); border: 2px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; margin-top: 10px;">
+          <p style="margin-bottom: 6px;">App: <strong>LWL Speiseplan v1.1.0</strong> (Nur Speisepläne · Ohne Anmeldung)</p>
+          <p style="margin-bottom: 6px;">Datenquelle: <strong id="settings-canteen-source">LWL-Von-Vincke-Schule Soest &amp; BBW Soest</strong></p>
+          <p style="margin-bottom: 0;" id="settings-canteen-updated">Letzte Aktualisierung: -</p>
+        </div>
+        <div class="form-actions" style="margin-top: 16px;">
+          <button type="button" class="btn btn-primary" onclick="refreshCanteenData(false)">
+            <span class="emoji-icon" aria-hidden="true">🔄 </span><strong>Speisepläne jetzt neu abrufen</strong>
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="resetCanteenCache()">
+            <span class="emoji-icon" aria-hidden="true">🗑️ </span>Zwischenspeicher zurücksetzen
+          </button>
+        </div>
+      </section>
+
+    </div>
+
   </main>
 
   <footer class="app-footer" role="contentinfo">
-    <p>LWL Speiseplan App · Mensa Von-Vincke-Schule &amp; BBW Soest · Keine Anmeldung erforderlich</p>
+    <p>LWL Speiseplan – Barrierefreie Mensa-App für Soest (WCAG 2.2 AAA &amp; TalkBack-optimiert) • Keine Anmeldung erforderlich</p>
   </footer>
 
   <script src="app.js"></script>

@@ -1,18 +1,27 @@
 'use strict';
 
-const STORAGE_KEY = 'lwl_speiseplan_only_v1';
-const REMOTE_FEED_URL = 'https://raw.githubusercontent.com/Lauju1909/BarrierefreiesWebUntis/main/canteen_seed.json';
+const STORAGE_KEY = 'lwl_speiseplan_android_v2';
+const REMOTE_CANTEEN_URL = 'https://raw.githubusercontent.com/Lauju1909/BarrierefreiesWebUntis/main/canteen_seed.json';
 
-const state = {
+let currentTab = 'canteen';
+
+let appData = {
+  settings: {
+    theme: 'theme-light',
+    fontSize: 'font-normal',
+    ttsEnabled: true,
+    ttsRate: 1.0,
+    textOnlyMode: false,
+    dietFilter: 'all'
+  },
   canteen: null,
-  selectedWeekId: null,
-  selectedDay: 'all',
-  dietFilter: 'all', // all | menu1 | menu2 | menu3
-  theme: 'dark',     // dark | light | contrast
-  fontSize: 'normal', // normal | large | xlarge
-  manualWeekChoice: false
+  selectedCanteenWeek: null,
+  selectedCanteenDay: 'all'
 };
 
+// =============================================================================
+// 1. HILFSFUNKTIONEN, SCREENREADER & SPRACHAUSGABE (WIE IM STUNDENPLAN)
+// =============================================================================
 function escHtml(str) {
   return String(str || '')
     .replace(/&/g, '&amp;')
@@ -23,10 +32,27 @@ function escHtml(str) {
 }
 
 function announceSR(text, priority = 'polite') {
-  const el = document.getElementById(priority === 'assertive' ? 'sr-live-assertive' : 'sr-live-polite');
+  const el = document.getElementById(priority === 'assertive' ? 'sr-live-assertive' : 'sr-live');
   if (!el) return;
   el.textContent = '';
-  setTimeout(() => { el.textContent = text; }, 40);
+  setTimeout(() => { el.textContent = text; }, 50);
+}
+
+function speak(text, force = false) {
+  if (!force && appData.settings && appData.settings.ttsEnabled === false) return;
+  if (!appData.settings.ttsEnabled && force) {
+    announceSR(text, 'assertive');
+    return;
+  }
+  try {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'de-DE';
+      utterance.rate = parseFloat(appData.settings.ttsRate) || 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  } catch (_) {}
 }
 
 function triggerHaptic() {
@@ -37,6 +63,135 @@ function triggerHaptic() {
   } catch (_) {}
 }
 
+function saveAppData() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+  } catch (_) {}
+}
+
+function loadAppData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed.settings) {
+      appData.settings = Object.assign({}, appData.settings, parsed.settings);
+    }
+    if (parsed.canteen && Array.isArray(parsed.canteen.weeks)) {
+      appData.canteen = parsed.canteen;
+    }
+    if (parsed.selectedCanteenWeek) {
+      appData.selectedCanteenWeek = parsed.selectedCanteenWeek;
+    }
+    if (parsed.selectedCanteenDay) {
+      appData.selectedCanteenDay = parsed.selectedCanteenDay;
+    }
+  } catch (_) {}
+}
+
+// =============================================================================
+// 2. REITER-NAVIGATION (1 = SPEISEPLAN, 2 = EINSTELLUNGEN)
+// =============================================================================
+function switchTab(tabId) {
+  currentTab = tabId;
+  const tabs = ['canteen', 'settings'];
+  tabs.forEach(t => {
+    const btn = document.getElementById('tab-' + t);
+    const panel = document.getElementById('view-' + t);
+    const isActive = (t === tabId);
+    if (btn) {
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+    }
+    if (panel) {
+      panel.classList.toggle('active', isActive);
+    }
+  });
+
+  triggerHaptic();
+  if (tabId === 'canteen') {
+    renderCanteenView();
+    announceSR('Reiter Mensa und Speisepläne geöffnet.', 'polite');
+  } else if (tabId === 'settings') {
+    syncSettingsForm();
+    announceSR('Reiter Einstellungen geöffnet.', 'polite');
+  }
+}
+
+// =============================================================================
+// 3. EINSTELLUNGEN (1:1 WIE IM STUNDENPLAN)
+// =============================================================================
+function applySettings() {
+  const body = document.getElementById('app-body') || document.body;
+  body.classList.remove('theme-light', 'theme-dark', 'theme-high-contrast');
+  body.classList.add(appData.settings.theme || 'theme-light');
+
+  body.classList.remove('font-normal', 'font-large', 'font-xlarge');
+  body.classList.add(appData.settings.fontSize || 'font-normal');
+
+  body.classList.toggle('text-only-mode', !!appData.settings.textOnlyMode);
+}
+
+function syncSettingsForm() {
+  const themeEl = document.getElementById('cfg-theme');
+  const fontEl = document.getElementById('cfg-font-size');
+  const rateEl = document.getElementById('cfg-tts-rate');
+  const ttsEl = document.getElementById('cfg-tts');
+  const textOnlyEl = document.getElementById('cfg-text-only');
+  const dietEl = document.getElementById('cfg-diet-filter');
+
+  if (themeEl) themeEl.value = appData.settings.theme || 'theme-light';
+  if (fontEl) fontEl.value = appData.settings.fontSize || 'font-normal';
+  if (rateEl) rateEl.value = String(appData.settings.ttsRate || '1.0');
+  if (ttsEl) ttsEl.checked = appData.settings.ttsEnabled !== false;
+  if (textOnlyEl) textOnlyEl.checked = !!appData.settings.textOnlyMode;
+  if (dietEl) dietEl.value = appData.settings.dietFilter || 'all';
+
+  const srcEl = document.getElementById('settings-canteen-source');
+  const updEl = document.getElementById('settings-canteen-updated');
+  if (srcEl && appData.canteen) {
+    srcEl.textContent = appData.canteen.source || 'LWL-Von-Vincke-Schule Soest & BBW Soest';
+  }
+  if (updEl && appData.canteen) {
+    updEl.textContent = 'Letzte Aktualisierung: ' + (appData.canteen.lastUpdated || 'Aktuell');
+  }
+}
+
+function saveSettings(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const themeEl = document.getElementById('cfg-theme');
+  const fontEl = document.getElementById('cfg-font-size');
+  const rateEl = document.getElementById('cfg-tts-rate');
+  const ttsEl = document.getElementById('cfg-tts');
+  const textOnlyEl = document.getElementById('cfg-text-only');
+  const dietEl = document.getElementById('cfg-diet-filter');
+
+  if (themeEl) appData.settings.theme = themeEl.value;
+  if (fontEl) appData.settings.fontSize = fontEl.value;
+  if (rateEl) appData.settings.ttsRate = parseFloat(rateEl.value) || 1.0;
+  if (ttsEl) appData.settings.ttsEnabled = ttsEl.checked;
+  if (textOnlyEl) appData.settings.textOnlyMode = textOnlyEl.checked;
+  if (dietEl) appData.settings.dietFilter = dietEl.value;
+
+  applySettings();
+  saveAppData();
+  renderCanteenView();
+  triggerHaptic();
+  announceSR('Einstellungen wurden gespeichert und angewendet.', 'polite');
+}
+
+function resetCanteenCache() {
+  appData.canteen = null;
+  appData.selectedCanteenWeek = null;
+  window._canteenWeekManuallySelected = false;
+  saveAppData();
+  refreshCanteenData(false);
+}
+
+// =============================================================================
+// 4. SPEISEPLAN-LOGIK (1:1 VERHALTEN WIE IM STUNDENPLAN)
+// =============================================================================
 function getISOWeekNumber(dateInput = new Date()) {
   const d = new Date(Date.UTC(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -48,396 +203,402 @@ function getISOWeekNumber(dateInput = new Date()) {
 function getDateRangeOfKW(year, kw) {
   const simple = new Date(Date.UTC(year, 0, 1 + (kw - 1) * 7));
   const dow = simple.getUTCDay();
-  const isoStart = new Date(simple);
-  if (dow <= 4) isoStart.setUTCDate(simple.getUTCDate() - simple.getUTCDay() + 1);
-  else isoStart.setUTCDate(simple.getUTCDate() + 8 - simple.getUTCDay());
-  const fri = new Date(isoStart);
-  fri.setUTCDate(isoStart.getUTCDate() + 4);
+  const ISOweekStart = new Date(simple);
+  if (dow <= 4) ISOweekStart.setUTCDate(simple.getUTCDate() - simple.getUTCDay() + 1);
+  else ISOweekStart.setUTCDate(simple.getUTCDate() + 8 - simple.getUTCDay());
+  const mon = new Date(ISOweekStart);
+  const fri = new Date(ISOweekStart);
+  fri.setUTCDate(mon.getUTCDate() + 4);
   const fmt = (d) =>
     String(d.getUTCDate()).padStart(2, '0') + '.' +
     String(d.getUTCMonth() + 1).padStart(2, '0') + '.' +
     d.getUTCFullYear();
-  return fmt(isoStart) + ' bis ' + fmt(fri);
+  return fmt(mon) + ' bis ' + fmt(fri);
 }
 
-function isDateToday(dateStr) {
-  if (!dateStr) return false;
-  const now = new Date();
-  const today =
-    String(now.getDate()).padStart(2, '0') + '.' +
-    String(now.getMonth() + 1).padStart(2, '0') + '.' +
-    now.getFullYear();
-  return dateStr.trim() === today;
+function getCanteenData() {
+  return appData.canteen || {
+    source: 'LWL-Von-Vincke-Schule Soest & BBW Soest',
+    lastUpdated: 'Lädt...',
+    weeks: []
+  };
 }
 
-function savePrefs() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      canteen: state.canteen,
-      selectedDay: state.selectedDay,
-      dietFilter: state.dietFilter,
-      theme: state.theme,
-      fontSize: state.fontSize
-    }));
-  } catch (_) {}
-}
-
-function loadPrefs() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (saved.canteen && Array.isArray(saved.canteen.weeks)) state.canteen = saved.canteen;
-    if (saved.selectedDay) state.selectedDay = saved.selectedDay;
-    if (saved.dietFilter) state.dietFilter = saved.dietFilter;
-    if (saved.theme) state.theme = saved.theme;
-    if (saved.fontSize) state.fontSize = saved.fontSize;
-  } catch (_) {}
-}
-
-function applyAppearance() {
-  document.documentElement.setAttribute('data-theme', state.theme);
-  document.documentElement.setAttribute('data-font', state.fontSize);
-
-  const themeLabels = { dark: 'Dunkel', light: 'Hell', contrast: 'Hoher Kontrast' };
-  const fontLabels = { normal: 'Normal', large: 'Groß', xlarge: 'Sehr groß' };
-
-  const btnTheme = document.getElementById('btn-theme');
-  if (btnTheme) btnTheme.innerHTML = `<span aria-hidden="true">🎨</span> Design: ${themeLabels[state.theme] || 'Dunkel'}`;
-  const btnFont = document.getElementById('btn-font');
-  if (btnFont) btnFont.innerHTML = `<span aria-hidden="true">🔤</span> Schrift: ${fontLabels[state.fontSize] || 'Normal'}`;
-}
-
-function cycleTheme() {
-  const order = ['dark', 'light', 'contrast'];
-  state.theme = order[(order.indexOf(state.theme) + 1) % order.length];
-  applyAppearance();
-  savePrefs();
-  triggerHaptic();
-  announceSR(`Design gewechselt auf ${state.theme === 'dark' ? 'Dunkel' : state.theme === 'light' ? 'Hell' : 'Hoher Kontrast'}.`);
-}
-
-function cycleFontSize() {
-  const order = ['normal', 'large', 'xlarge'];
-  state.fontSize = order[(order.indexOf(state.fontSize) + 1) % order.length];
-  applyAppearance();
-  savePrefs();
-  triggerHaptic();
-  announceSR(`Schriftgröße gewechselt auf ${state.fontSize === 'normal' ? 'Normal' : state.fontSize === 'large' ? 'Groß' : 'Sehr groß'}.`);
-}
-
-function getWeeksList() {
-  const known = (state.canteen && Array.isArray(state.canteen.weeks)) ? state.canteen.weeks : [];
-  const dict = {};
-  known.forEach(w => {
-    if (w && w.weekId) dict[w.weekId] = w;
-  });
+function getFullCanteenWeeksList(canteenData) {
+  const data = canteenData || getCanteenData();
+  const knownWeeks = (data && Array.isArray(data.weeks)) ? data.weeks : [];
+  const knownDict = {};
+  knownWeeks.forEach(w => { if (w && w.weekId) knownDict[w.weekId] = w; });
 
   const now = new Date();
-  const curKw = getISOWeekNumber(now);
-  const year = now.getFullYear();
+  const currentKw = getISOWeekNumber(now);
+  const currentYear = now.getFullYear();
 
-  const kws = new Set([curKw - 1, curKw, curKw + 1, curKw + 2, curKw + 3]);
-  Object.values(dict).forEach(w => {
-    if (typeof w.kw === 'number' && w.kw > 0) kws.add(w.kw);
+  const candidateKws = [
+    currentKw - 1,
+    currentKw,
+    currentKw + 1,
+    currentKw + 2,
+    currentKw + 3
+  ];
+
+  Object.keys(knownDict).forEach(wid => {
+    const w = knownDict[wid];
+    if (typeof w.kw === 'number' && !candidateKws.includes(w.kw)) {
+      candidateKws.push(w.kw);
+    }
   });
 
-  return Array.from(kws)
-    .filter(k => k >= 1 && k <= 53)
-    .sort((a, b) => a - b)
-    .map(kw => {
-      const wid = 'kw' + kw;
-      const found = dict[wid];
-      const range = (found && found.dateRange) || getDateRangeOfKW(year, kw);
-      const isCur = kw === curKw;
-      const hasData = !!(found && Array.isArray(found.days) && found.days.length > 0);
-      let label = `KW ${kw} (${range})`;
-      if (isCur) label = `Diese Woche · KW ${kw} (${range})`;
-      else if (kw === curKw + 1) label = `Nächste Woche · KW ${kw} (${range})`;
-      else if (kw === curKw - 1) label = `Vorige Woche · KW ${kw} (${range})`;
+  const validKws = candidateKws.filter(k => k >= 1 && k <= 53).sort((a, b) => a - b);
 
+  return validKws.map(kw => {
+    const wid = 'kw' + kw;
+    const range = getDateRangeOfKW(currentYear, kw);
+    const isCur = (kw === currentKw);
+
+    let defaultLabel = 'Kalenderwoche ' + kw + ' (' + range + ')';
+    if (isCur) {
+      defaultLabel = 'Diese Woche (KW ' + kw + ': ' + range + ')';
+    } else if (kw === currentKw - 1) {
+      defaultLabel = 'Vorige Woche (KW ' + kw + ': ' + range + ')';
+    } else if (kw === currentKw + 1) {
+      defaultLabel = 'Nächste Woche (KW ' + kw + ': ' + range + ')';
+    }
+
+    if (knownDict[wid]) {
+      const k = knownDict[wid];
+      const hasDays = Array.isArray(k.days) && k.days.length > 0;
       return {
         weekId: wid,
-        kw,
-        label,
-        dateRange: range,
+        kw: kw,
+        label: isCur ? ('Diese Woche (KW ' + kw + ': ' + (k.dateRange || range) + ')') : (k.label || defaultLabel),
+        dateRange: k.dateRange || range,
         isCurrent: isCur,
-        hasData,
-        days: hasData ? found.days : []
+        hasData: hasDays,
+        days: k.days || []
       };
-    });
+    }
+
+    return {
+      weekId: wid,
+      kw: kw,
+      label: defaultLabel,
+      dateRange: range,
+      isCurrent: isCur,
+      hasData: false,
+      days: []
+    };
+  });
 }
 
-function getSmartDefaultWeekId(weeks) {
+function getSmartDefaultCanteenWeekId(allWeeks) {
   const now = new Date();
   const curKw = getISOWeekNumber(now);
   const dow = now.getDay(); // 0=So, 5=Fr, 6=Sa
-  const preferNext = (dow === 0 || dow === 6 || (dow === 5 && now.getHours() >= 15));
-
-  if (preferNext) {
+  const isWeekendOrFriAfternoon = (dow === 0 || dow === 6 || (dow === 5 && now.getHours() >= 15));
+  if (isWeekendOrFriAfternoon) {
     const nextWid = 'kw' + (curKw + 1);
-    if (weeks.some(w => w.weekId === nextWid && w.hasData)) return nextWid;
+    if (allWeeks && allWeeks.some(w => w.weekId === nextWid && w.hasData)) {
+      return nextWid;
+    }
   }
   const curWid = 'kw' + curKw;
-  if (weeks.some(w => w.weekId === curWid && w.hasData)) return curWid;
-
-  const upcoming = weeks.find(w => w.kw >= curKw && w.hasData);
-  if (upcoming) return upcoming.weekId;
-
-  const latest = [...weeks].reverse().find(w => w.hasData);
-  return latest ? latest.weekId : curWid;
+  if (allWeeks && allWeeks.some(w => w.weekId === curWid && w.hasData)) {
+    return curWid;
+  }
+  if (allWeeks) {
+    const upcoming = allWeeks.find(w => w.kw >= curKw && w.hasData);
+    if (upcoming) return upcoming.weekId;
+    const latestWithData = [...allWeeks].reverse().find(w => w.hasData);
+    if (latestWithData) return latestWithData.weekId;
+  }
+  return curWid;
 }
 
-function selectWeek(weekId, fromSelect = false) {
-  state.manualWeekChoice = true;
-  state.selectedWeekId = weekId;
+function setCanteenWeek(weekId, fromSelect = false) {
+  window._canteenWeekManuallySelected = true;
+  if (appData.selectedCanteenWeek === weekId) return;
+  appData.selectedCanteenWeek = weekId;
+  saveAppData();
   triggerHaptic();
-  renderAll();
+  renderCanteenView(fromSelect);
   if (!fromSelect) {
-    const wk = getWeeksList().find(w => w.weekId === weekId);
-    announceSR(`Speiseplan für ${wk ? wk.label : weekId} angezeigt.`);
+    const allWeeks = getFullCanteenWeeksList();
+    const wk = allWeeks.find(w => w.weekId === weekId);
+    const label = wk ? wk.label : weekId;
+    announceSR(`Speiseplan für ${label} geladen.`, 'polite');
   }
 }
 
-function changeWeek(delta) {
-  const weeks = getWeeksList();
-  let idx = weeks.findIndex(w => w.weekId === state.selectedWeekId);
-  if (idx === -1) idx = weeks.findIndex(w => w.isCurrent);
-  if (idx === -1) idx = 0;
-  const nextIdx = Math.max(0, Math.min(weeks.length - 1, idx + delta));
-  selectWeek(weeks[nextIdx].weekId, false);
+function changeCanteenWeek(delta) {
+  const allWeeks = getFullCanteenWeeksList();
+  let currentIdx = allWeeks.findIndex(w => w.weekId === appData.selectedCanteenWeek);
+  if (currentIdx === -1) {
+    const curIdx = allWeeks.findIndex(w => w.isCurrent);
+    currentIdx = curIdx !== -1 ? curIdx : 0;
+  }
+  let newIdx = currentIdx + delta;
+  if (newIdx < 0) newIdx = 0;
+  if (newIdx >= allWeeks.length) newIdx = allWeeks.length - 1;
+  setCanteenWeek(allWeeks[newIdx].weekId, false);
 }
 
-function selectDay(dayId) {
-  state.selectedDay = dayId;
-  savePrefs();
+function setCanteenDay(dayName) {
+  appData.selectedCanteenDay = dayName;
+  saveAppData();
   triggerHaptic();
-  renderAll();
-  announceSR(`Tagesfilter: ${dayId === 'all' ? 'Ganze Woche' : dayId}.`);
+  renderCanteenView();
+  const label = dayName === 'all' ? 'Alle Wochentage' : dayName;
+  announceSR(`Tagesfilter ${label} aktiviert.`, 'polite');
 }
 
-function selectDiet(dietId) {
-  state.dietFilter = dietId;
-  savePrefs();
-  triggerHaptic();
-  renderAll();
-  const labels = {
-    all: 'Alle Menüs',
-    menu1: 'Nur Menü 1 Vollkost',
-    menu2: 'Nur Menü 2 Muslimisch ohne Schwein',
-    menu3: 'Nur Menü 3 Vegetarisch'
-  };
-  announceSR(`Menü-Ansicht: ${labels[dietId] || 'Alle Menüs'}.`);
+function isCanteenDateToday(dateStr) {
+  if (!dateStr) return false;
+  const now = new Date();
+  const d = String(now.getDate()).padStart(2, '0');
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const y = String(now.getFullYear());
+  return dateStr.trim() === `${d}.${m}.${y}`;
 }
 
-function renderAll() {
-  const weeks = getWeeksList();
-  const curKw = getISOWeekNumber();
-
-  if (!state.selectedWeekId || !weeks.some(w => w.weekId === state.selectedWeekId)) {
-    state.selectedWeekId = getSmartDefaultWeekId(weeks);
-  }
-
-  // Statusbar
-  const statusEl = document.getElementById('status-bar');
-  if (statusEl && state.canteen) {
-    const src = state.canteen.source || 'LWL Mensa Soest';
-    const upd = state.canteen.lastUpdated || 'Aktuell';
-    statusEl.textContent = `Quelle: ${src} · Stand: ${upd}`;
-  }
-
-  // Dropdown
-  const sel = document.getElementById('week-select');
-  if (sel) {
-    sel.innerHTML = weeks.map(w => `
-      <option value="${escHtml(w.weekId)}" ${w.weekId === state.selectedWeekId ? 'selected' : ''}>
-        ${escHtml(w.label)} ${w.hasData ? '✓' : '(kein Plan)'}
-      </option>
-    `).join('');
-  }
-
-  // Quick Week Pills
-  const quickEl = document.getElementById('week-quick-pills');
-  if (quickEl) {
-    const quickKws = [curKw - 1, curKw, curKw + 1, curKw + 2].filter(k => k >= 1 && k <= 53);
-    quickEl.innerHTML = quickKws.map(kw => {
-      const wid = 'kw' + kw;
-      const wkObj = weeks.find(w => w.weekId === wid);
-      const active = state.selectedWeekId === wid;
-      const tag = kw === curKw ? 'Diese Woche' : kw === curKw + 1 ? 'Nächste' : kw === curKw - 1 ? 'Vorige' : `KW ${kw}`;
-      const label = (kw === curKw || kw === curKw + 1 || kw === curKw - 1) ? `KW ${kw} (${tag})` : `KW ${kw}`;
-      return `
-        <button type="button" class="pill-btn ${active ? 'active' : ''}"
-                onclick="selectWeek('${wid}', false)"
-                aria-pressed="${active}">
-          ${escHtml(label)}${wkObj && wkObj.hasData ? '' : ' · leer'}
-        </button>
-      `;
-    }).join('');
-  }
-
-  // Day Filter Bar
-  const dayBar = document.getElementById('day-filter-bar');
-  if (dayBar) {
-    const dayBtns = [
-      { id: 'all', label: 'Ganze Woche' },
-      { id: 'Montag', label: 'Mo' },
-      { id: 'Dienstag', label: 'Di' },
-      { id: 'Mittwoch', label: 'Mi' },
-      { id: 'Donnerstag', label: 'Do' },
-      { id: 'Freitag', label: 'Fr' }
-    ];
-    dayBar.innerHTML = dayBtns.map(b => {
-      const active = state.selectedDay === b.id;
-      return `
-        <button type="button" role="tab" aria-selected="${active}"
-                class="pill-btn ${active ? 'active' : ''}"
-                onclick="selectDay('${b.id}')">
-          ${escHtml(b.label)}
-        </button>
-      `;
-    }).join('');
-  }
-
-  // Diet Filter Bar
-  const dietBar = document.getElementById('diet-filter-bar');
-  if (dietBar) {
-    const dietBtns = [
-      { id: 'all', label: 'Alle Menüs' },
-      { id: 'menu1', label: '🍲 Vollkost' },
-      { id: 'menu2', label: '🥩 Ohne Schwein' },
-      { id: 'menu3', label: '🥗 Vegetarisch' }
-    ];
-    dietBar.innerHTML = dietBtns.map(b => {
-      const active = state.dietFilter === b.id;
-      return `
-        <button type="button" aria-pressed="${active}"
-                class="pill-btn ${active ? 'active' : ''}"
-                onclick="selectDiet('${b.id}')">
-          ${escHtml(b.label)}
-        </button>
-      `;
-    }).join('');
-  }
-
-  // Days Container
-  const container = document.getElementById('canteen-container');
+function renderCanteenView() {
+  const container = document.getElementById('canteen-days-container');
   if (!container) return;
 
-  const activeWeek = weeks.find(w => w.weekId === state.selectedWeekId);
-  if (!activeWeek || !activeWeek.hasData) {
-    container.innerHTML = `
-      <article class="empty-card">
-        <h2>Noch kein Speiseplan für KW ${activeWeek ? activeWeek.kw : ''}</h2>
-        <p>Für den Zeitraum <strong>${escHtml(activeWeek ? activeWeek.dateRange : '')}</strong> liegt aktuell noch kein Plan der Mensa vor.</p>
-        <p>Neue Pläne erscheinen in der Regel am Freitag vor Beginn der Woche.</p>
-        <button type="button" class="icon-btn primary" onclick="refreshCanteenPlans(false)">
-          🔄 Jetzt neu laden
+  const data = getCanteenData();
+  const allWeeks = getFullCanteenWeeksList(data);
+
+  // 1. Wochenauswahl-Dropdown synchronisieren (identisch zum Stundenplan)
+  const curKw = getISOWeekNumber();
+  const smartWeekId = getSmartDefaultCanteenWeekId(allWeeks);
+  let selectedWeekId = appData.selectedCanteenWeek;
+  const savedKwNum = selectedWeekId ? parseInt(String(selectedWeekId).replace(/^kw/i, ''), 10) : 0;
+  const smartKwNum = parseInt(String(smartWeekId).replace(/^kw/i, ''), 10) || curKw;
+  if (
+    !selectedWeekId ||
+    !allWeeks.some(w => w.weekId === selectedWeekId) ||
+    (!window._canteenWeekManuallySelected && savedKwNum < smartKwNum)
+  ) {
+    selectedWeekId = smartWeekId;
+    appData.selectedCanteenWeek = selectedWeekId;
+  }
+
+  const weekSelect = document.getElementById('canteen-week-select');
+  if (weekSelect) {
+    weekSelect.innerHTML = allWeeks.map(w => `
+      <option value="${escHtml(w.weekId)}" ${w.weekId === selectedWeekId ? 'selected' : ''}>
+        ${escHtml(w.label)} ${w.hasData ? '(Speiseplan verfügbar)' : '(Noch kein Plan)'}
+      </option>
+    `).join('');
+    if (weekSelect.value !== selectedWeekId) {
+      weekSelect.value = selectedWeekId;
+    }
+  }
+
+  // 2. Schnellwahl-Buttons für Wochen
+  const quickNav = document.getElementById('canteen-week-quick-nav');
+  if (quickNav) {
+    const quickItems = [
+      { id: 'kw' + (curKw - 1), label: 'KW ' + (curKw - 1) + ' (Vorige)' },
+      { id: 'kw' + curKw, label: 'KW ' + curKw + ' (Diese Woche)' },
+      { id: 'kw' + (curKw + 1), label: 'KW ' + (curKw + 1) + ' (Nächste)' },
+      { id: 'kw' + (curKw + 2), label: 'KW ' + (curKw + 2) }
+    ].filter(it => {
+      const n = parseInt(it.id.replace('kw', ''), 10);
+      return n >= 1 && n <= 53;
+    });
+    quickNav.innerHTML = quickItems.map(item => {
+      const isSel = (selectedWeekId === item.id);
+      return `
+        <button type="button"
+                class="canteen-day-btn ${isSel ? 'active' : ''}"
+                style="font-size: 13px; padding: 5px 10px;"
+                onclick="setCanteenWeek('${item.id}', false)"
+                aria-label="${escHtml(item.label)}">
+          ${escHtml(item.label)}
         </button>
-      </article>
+      `;
+    }).join('');
+  }
+
+  // 3. Status- und Quellen-Banner
+  const statusBanner = document.getElementById('canteen-status-banner');
+  if (statusBanner) {
+    statusBanner.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span class="canteen-source-tag">
+          <span class="emoji-icon" aria-hidden="true">🏫 </span>
+          <strong>Quelle:</strong> ${escHtml(data.source || 'LWL-Bildungszentrum Soest')}
+        </span>
+        <span style="color: var(--text-secondary); font-size: 13.5px;">
+          <span class="emoji-icon" aria-hidden="true">🕒 </span>Stand: ${escHtml(data.lastUpdated || 'Aktuell')}
+        </span>
+      </div>
+      <div style="font-size: 13.5px; color: var(--text-secondary);">
+        <span class="emoji-icon" aria-hidden="true">ℹ️ </span>Offizieller Speiseplan (Mo–Do Vollkost, Muslimisch &amp; Vegetarisch)
+      </div>
     `;
-    return;
   }
 
-  let days = activeWeek.days;
-  if (state.selectedDay !== 'all') {
-    days = days.filter(d => (d.day || '').toLowerCase() === state.selectedDay.toLowerCase());
+  // 4. Tages-Schnellfilter-Leiste
+  const dayFilterBar = document.getElementById('canteen-day-filter-bar');
+  const selectedDay = appData.selectedCanteenDay || 'all';
+  if (dayFilterBar) {
+    const dayButtons = [
+      { id: 'all', label: 'Ganze Woche' },
+      { id: 'Montag', label: 'Montag' },
+      { id: 'Dienstag', label: 'Dienstag' },
+      { id: 'Mittwoch', label: 'Mittwoch' },
+      { id: 'Donnerstag', label: 'Donnerstag' },
+      { id: 'Freitag', label: 'Freitag' }
+    ];
+    dayFilterBar.innerHTML = dayButtons.map(btn => {
+      const isActive = (selectedDay === btn.id);
+      return `
+        <button type="button"
+                class="canteen-day-btn ${isActive ? 'active' : ''}"
+                role="tab"
+                aria-selected="${isActive}"
+                onclick="setCanteenDay('${btn.id}')"
+                aria-label="${btn.label} anzeigen">
+          ${escHtml(btn.label)}
+        </button>
+      `;
+    }).join('');
   }
 
-  if (days.length === 0) {
+  // 5. Gewählte Woche ermitteln & Tage darstellen
+  const activeWeek = allWeeks.find(w => w.weekId === selectedWeekId) || allWeeks[1];
+  if (!activeWeek || !activeWeek.hasData || !activeWeek.days || activeWeek.days.length === 0) {
     container.innerHTML = `
-      <article class="empty-card">
-        <h2>Kein Eintrag für ${escHtml(state.selectedDay)}</h2>
-        <p>Am Freitag findet im Internat in der Regel die Heimreise mit Snack- und Lunchpaket-Ausgabe bis 12:30 Uhr statt.</p>
-        <button type="button" class="pill-btn active" onclick="selectDay('all')">Ganze Woche anzeigen</button>
+      <article class="canteen-day-card" style="padding: 34px 20px; text-align: center; border: 2px dashed var(--accent-info); background: var(--bg-surface-elevated);" aria-labelledby="heading-no-canteen-plan">
+        <h3 id="heading-no-canteen-plan" class="canteen-day-title" style="justify-content: center; font-size: 1.3rem; margin-bottom: 12px;">
+          <span class="emoji-icon" aria-hidden="true">📅 </span>Für diese Woche liegt noch kein Speiseplan vor
+        </h3>
+        <p style="font-size: 16px; color: var(--text-primary); max-width: 620px; margin: 0 auto 16px auto; line-height: 1.6;">
+          Für die <strong>Kalenderwoche ${activeWeek ? activeWeek.kw : ''} (${escHtml(activeWeek ? activeWeek.dateRange : '')})</strong> hat die Mensa noch keinen Speiseplan herausgegeben.
+        </p>
+        <div style="background: var(--bg-surface); padding: 14px 18px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: inline-block; text-align: left; max-width: 550px; margin-bottom: 20px;">
+          <p style="margin: 0; font-size: 14.5px; color: var(--text-secondary); line-height: 1.5;">
+            <span class="emoji-icon" aria-hidden="true">ℹ️ </span><strong>Wann erscheint der Plan?</strong><br>
+            Die Küche der Mensa (Von-Vincke-Schule &amp; BBW Soest) veröffentlicht neue Speisepläne gewöhnlich am <strong>Freitag vor Beginn der jeweiligen Schulwoche</strong>.
+          </p>
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+          <button type="button" class="btn btn-primary" onclick="refreshCanteenData(false)" aria-label="Jetzt prüfen ob ein Speiseplan veröffentlicht wurde">
+            <span class="emoji-icon" aria-hidden="true">🔄 </span>Speisepläne jetzt neu abrufen (Taste A)
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="setCanteenWeek('kw' + getISOWeekNumber(), false)" aria-label="Zur aktuellen Schulwoche (KW ${curKw}) zurückkehren">
+            <span class="emoji-icon" aria-hidden="true">🍽️ </span>Zur aktuellen Woche (KW ${curKw})
+          </button>
+        </div>
       </article>
     `;
     return;
   }
 
-  const showM1 = state.dietFilter === 'all' || state.dietFilter === 'menu1';
-  const showM2 = state.dietFilter === 'all' || state.dietFilter === 'menu2';
-  const showM3 = state.dietFilter === 'all' || state.dietFilter === 'menu3';
+  let daysToRender = activeWeek.days;
+  if (selectedDay !== 'all') {
+    daysToRender = activeWeek.days.filter(d => (d.day || '').toLowerCase() === selectedDay.toLowerCase());
+  }
 
-  let html = days.map(d => {
-    const today = isDateToday(d.date);
-    return `
-      <article class="day-card ${today ? 'is-today' : ''}" aria-label="${escHtml(d.day)}, ${escHtml(d.date)}">
-        <header class="day-header">
-          <h2 class="day-title">
-            <span>📅 ${escHtml(d.day)}, ${escHtml(d.date)}</span>
-            ${today ? '<span class="today-badge">Heute</span>' : ''}
-          </h2>
-          <span class="serving-time">Ausgabe: 11:45 – 13:45 Uhr</span>
+  const dietFilter = (appData.settings && appData.settings.dietFilter) || 'all';
+  const showM1 = dietFilter === 'all' || dietFilter === 'menu1';
+  const showM2 = dietFilter === 'all' || dietFilter === 'menu2';
+  const showM3 = dietFilter === 'all' || dietFilter === 'menu3';
+
+  let html = '';
+  daysToRender.forEach(d => {
+    const isToday = isCanteenDateToday(d.date);
+    html += `
+      <article class="canteen-day-card ${isToday ? 'is-today' : ''}" aria-labelledby="heading-day-${escHtml(d.day)}">
+        <header class="canteen-day-header">
+          <h3 id="heading-day-${escHtml(d.day)}" class="canteen-day-title">
+            <span class="emoji-icon" aria-hidden="true">📅 </span>
+            <span>${escHtml(d.day)}, ${escHtml(d.date)}</span>
+            ${isToday ? '<span class="canteen-today-badge"><span class="emoji-icon" aria-hidden="true">🔴 </span>Heute</span>' : ''}
+          </h3>
+          <span style="font-size: 13.5px; color: var(--text-secondary); font-weight: 600;">
+            Mensa Essensausgabe 11:45 – 13:45 Uhr
+          </span>
         </header>
 
-        <div class="menus-grid">
+        <div class="canteen-menus-grid" role="region" aria-label="Mittagsmenüs">
           ${showM1 ? `
-            <div class="menu-box">
-              <div class="menu-box-header">
-                <h3 class="menu-box-title">🍲 Menü 1</h3>
-                <span class="menu-badge badge-m1">Vollkost</span>
+            <div class="canteen-menu-card">
+              <div class="canteen-menu-header">
+                <h4 style="margin: 0; font-size: 14.5px; font-weight: 700; color: var(--text-primary);">
+                  <span class="emoji-icon" aria-hidden="true">🍲 </span>Menü 1: Vollkost
+                </h4>
+                <span class="canteen-menu-badge badge-vollkost">Vollkost</span>
               </div>
-              <div class="dish-text">${escHtml(d.menu1 || 'Kein Angebot')}</div>
+              <div class="canteen-dish-text">${escHtml(d.menu1 || 'Kein Angebot')}</div>
             </div>
           ` : ''}
 
           ${showM2 ? `
-            <div class="menu-box">
-              <div class="menu-box-header">
-                <h3 class="menu-box-title">🥩 Menü 2</h3>
-                <span class="menu-badge badge-m2">Ohne Schwein</span>
+            <div class="canteen-menu-card">
+              <div class="canteen-menu-header">
+                <h4 style="margin: 0; font-size: 14.5px; font-weight: 700; color: var(--text-primary);">
+                  <span class="emoji-icon" aria-hidden="true">🥩 </span>Menü 2: Muslimische Kost
+                </h4>
+                <span class="canteen-menu-badge badge-muslimisch">Ohne Schwein</span>
               </div>
-              <div class="dish-text">${escHtml(d.menu2 || 'Kein Angebot')}</div>
+              <div class="canteen-dish-text">${escHtml(d.menu2 || 'Kein Angebot')}</div>
             </div>
           ` : ''}
 
           ${showM3 ? `
-            <div class="menu-box">
-              <div class="menu-box-header">
-                <h3 class="menu-box-title">🥗 Menü 3</h3>
-                <span class="menu-badge badge-m3">Vegetarisch</span>
+            <div class="canteen-menu-card">
+              <div class="canteen-menu-header">
+                <h4 style="margin: 0; font-size: 14.5px; font-weight: 700; color: var(--text-primary);">
+                  <span class="emoji-icon" aria-hidden="true">🥗 </span>Menü 3: Vegetarisch
+                </h4>
+                <span class="canteen-menu-badge badge-vegetarisch">Vegetarisch</span>
               </div>
-              <div class="dish-text">${escHtml(d.menu3 || 'Kein Angebot')}</div>
+              <div class="canteen-dish-text">${escHtml(d.menu3 || 'Kein Angebot')}</div>
             </div>
           ` : ''}
         </div>
 
-        ${(d.breakfast || d.extra || d.dinner) ? `
-          <div class="side-grid">
-            ${d.breakfast ? `
-              <div class="side-box">
-                <h4 class="side-title">🥐 Frühstück</h4>
-                <div class="dish-text">${escHtml(d.breakfast)}</div>
-              </div>
-            ` : ''}
-            ${d.extra ? `
-              <div class="side-box">
-                <h4 class="side-title">🥗 Salattheke &amp; Extras</h4>
-                <div class="dish-text">${escHtml(d.extra)}</div>
-              </div>
-            ` : ''}
-            ${d.dinner ? `
-              <div class="side-box">
-                <h4 class="side-title">🥪 Abendessen (Internat)</h4>
-                <div class="dish-text">${escHtml(d.dinner)}</div>
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
+        <div class="canteen-side-grid" role="region" aria-label="Zusatzangebot und weitere Mahlzeiten">
+          ${d.breakfast ? `
+            <div class="canteen-side-box">
+              <h5 class="canteen-side-title"><span class="emoji-icon" aria-hidden="true">🥐 </span>Frühstück:</h5>
+              <div class="canteen-dish-text">${escHtml(d.breakfast)}</div>
+            </div>
+          ` : ''}
+
+          ${d.extra ? `
+            <div class="canteen-side-box">
+              <h5 class="canteen-side-title"><span class="emoji-icon" aria-hidden="true">🥗 </span>Salattheke &amp; Extras:</h5>
+              <div class="canteen-dish-text">${escHtml(d.extra)}</div>
+            </div>
+          ` : ''}
+
+          ${d.dinner ? `
+            <div class="canteen-side-box">
+              <h5 class="canteen-side-title"><span class="emoji-icon" aria-hidden="true">🥪 </span>Abendessen (Internat):</h5>
+              <div class="canteen-dish-text">${escHtml(d.dinner)}</div>
+            </div>
+          ` : ''}
+        </div>
       </article>
     `;
-  }).join('');
+  });
 
-  if (state.selectedDay === 'all' && !days.some(d => (d.day || '').toLowerCase() === 'freitag')) {
+  if (selectedDay === 'all' && !daysToRender.some(d => (d.day || '').toLowerCase() === 'freitag')) {
     html += `
-      <article class="day-card" style="border-style: dashed;">
-        <header class="day-header" style="border-bottom: none; padding-bottom: 0;">
-          <h2 class="day-title">🚌 Freitag (Heimreisetag)</h2>
-          <span class="serving-time">Mensa bis 12:30 Uhr</span>
+      <article class="canteen-day-card" style="border-style: dashed; background: var(--bg-surface-elevated);" aria-labelledby="heading-day-freitag">
+        <header class="canteen-day-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">
+          <h3 id="heading-day-freitag" class="canteen-day-title" style="font-size: 1.05rem;">
+            <span class="emoji-icon" aria-hidden="true">🚌 </span>
+            <span>Freitag (Heimreisetag / Lunchpakete)</span>
+          </h3>
+          <span style="font-size: 13px; color: var(--text-secondary);">Mensa geöffnet bis 12:30 Uhr</span>
         </header>
-        <p style="margin: 0; color: var(--text-secondary);">
-          Am Freitag gibt es belegte Brötchen, Snacks und Lunchpakete für die Heimreise.
+        <p style="margin: 8px 0 0 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5;">
+          Am Freitag findet im Internat und Bildungszentrum die Heimreise statt. In der Mensa werden Snackangebote, belegte Brötchen und Lunchpakete ausgegeben.
         </p>
       </article>
     `;
@@ -446,50 +607,46 @@ function renderAll() {
   container.innerHTML = html;
 }
 
-function readCurrentPlanAloud() {
-  const weeks = getWeeksList();
-  const activeWeek = weeks.find(w => w.weekId === state.selectedWeekId);
-  if (!activeWeek || !activeWeek.hasData) {
-    speakText('Für die ausgewählte Woche liegt noch kein Speiseplan vor.');
+function readCanteenSummary() {
+  const data = getCanteenData();
+  const allWeeks = getFullCanteenWeeksList(data);
+  const selectedWeekId = appData.selectedCanteenWeek || getSmartDefaultCanteenWeekId(allWeeks);
+  const activeWeek = allWeeks.find(w => w.weekId === selectedWeekId) || allWeeks[1];
+
+  if (!activeWeek || !activeWeek.hasData || !activeWeek.days || activeWeek.days.length === 0) {
+    const kwLabel = activeWeek ? `Kalenderwoche ${activeWeek.kw}` : 'diese Woche';
+    const msg = `Für die ${kwLabel} liegt noch kein Speiseplan der Mensa vor. Die Pläne werden in der Regel am Freitag der Vorwoche veröffentlicht.`;
+    speak(msg, true);
+    announceSR(msg, 'assertive');
     return;
   }
 
+  const selectedDay = appData.selectedCanteenDay || 'all';
   let targetDay = null;
-  if (state.selectedDay !== 'all') {
-    targetDay = activeWeek.days.find(d => (d.day || '').toLowerCase() === state.selectedDay.toLowerCase());
+  if (selectedDay !== 'all') {
+    targetDay = activeWeek.days.find(d => (d.day || '').toLowerCase() === selectedDay.toLowerCase());
   } else {
-    targetDay = activeWeek.days.find(d => isDateToday(d.date)) || activeWeek.days[0];
+    targetDay = activeWeek.days.find(d => isCanteenDateToday(d.date)) || activeWeek.days[0];
   }
   if (!targetDay) targetDay = activeWeek.days[0];
 
-  const clean = (t) => String(t || '').replace(/\n/g, ', ');
-  let msg = `Speiseplan für ${targetDay.day}, den ${targetDay.date}. `;
-  if ((state.dietFilter === 'all' || state.dietFilter === 'menu1') && targetDay.menu1) {
-    msg += `Menü 1 Vollkost: ${clean(targetDay.menu1)}. `;
+  const dietFilter = (appData.settings && appData.settings.dietFilter) || 'all';
+  let speech = `Mensa Speiseplan für ${targetDay.day}, den ${targetDay.date}. `;
+  if ((dietFilter === 'all' || dietFilter === 'menu1') && targetDay.menu1) {
+    speech += `Menü 1 Vollkost: ${targetDay.menu1.replace(/\n/g, ', ')}. `;
   }
-  if ((state.dietFilter === 'all' || state.dietFilter === 'menu2') && targetDay.menu2) {
-    msg += `Menü 2 Muslimisch ohne Schwein: ${clean(targetDay.menu2)}. `;
+  if ((dietFilter === 'all' || dietFilter === 'menu2') && targetDay.menu2) {
+    speech += `Menü 2 Muslimische Kost ohne Schwein: ${targetDay.menu2.replace(/\n/g, ', ')}. `;
   }
-  if ((state.dietFilter === 'all' || state.dietFilter === 'menu3') && targetDay.menu3) {
-    msg += `Menü 3 Vegetarisch: ${clean(targetDay.menu3)}. `;
+  if ((dietFilter === 'all' || dietFilter === 'menu3') && targetDay.menu3) {
+    speech += `Menü 3 Vegetarisch: ${targetDay.menu3.replace(/\n/g, ', ')}. `;
   }
   if (targetDay.extra) {
-    msg += `Zusatzangebot: ${clean(targetDay.extra)}.`;
+    speech += `Salattheke und Zusatzangebot: ${targetDay.extra.replace(/\n/g, ', ')}. `;
   }
-  speakText(msg);
-}
 
-function speakText(text) {
-  announceSR(text, 'assertive');
-  try {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'de-DE';
-      u.rate = 1.0;
-      window.speechSynthesis.speak(u);
-    }
-  } catch (_) {}
+  speak(speech, true);
+  announceSR(speech, 'assertive');
 }
 
 async function fetchJsonSafe(url) {
@@ -506,66 +663,121 @@ async function fetchJsonSafe(url) {
   return await resp.json();
 }
 
-async function refreshCanteenPlans(silent = false) {
-  const btn = document.getElementById('btn-refresh');
-  if (btn && !silent) btn.disabled = true;
+async function refreshCanteenData(silent = false) {
+  const btn = document.getElementById('btn-sync-canteen');
+  const statusText = document.getElementById('sync-status-text');
+  if (btn && !silent) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="emoji-icon" aria-hidden="true">⏳ </span>Lade Speisepläne...';
+  }
+  if (statusText) statusText.textContent = 'Aktualisiere...';
 
-  let loaded = null;
+  if (!silent) {
+    announceSR('Mensa-Speisepläne werden aus dem Internet synchronisiert...', 'assertive');
+  }
+
   try {
-    const remote = await fetchJsonSafe(`${REMOTE_FEED_URL}?t=${Date.now()}`);
-    if (remote && Array.isArray(remote.weeks) && remote.weeks.length > 0) {
-      loaded = remote;
-    }
-  } catch (_) {}
+    let freshData = null;
 
-  if (!loaded) {
+    // 1. Online GitHub Raw Live-Feed (funktioniert auf Android im Internet)
     try {
-      const localSeed = await fetchJsonSafe('canteen_seed.json');
-      if (localSeed && Array.isArray(localSeed.weeks) && localSeed.weeks.length > 0) {
-        loaded = localSeed;
+      const json = await fetchJsonSafe(REMOTE_CANTEEN_URL + '?t=' + Date.now());
+      if (json && Array.isArray(json.weeks) && json.weeks.length > 0) {
+        freshData = json;
       }
     } catch (_) {}
-  }
 
-  if (loaded) {
-    state.canteen = loaded;
-    const weeks = getWeeksList();
-    if (!state.manualWeekChoice) {
-      state.selectedWeekId = getSmartDefaultWeekId(weeks);
+    // 2. Fallback: Lokale Datei canteen_seed.json (Android APK Assets / Offline-Seed)
+    if (!freshData) {
+      try {
+        const json = await fetchJsonSafe('canteen_seed.json');
+        if (json && Array.isArray(json.weeks) && json.weeks.length > 0) {
+          freshData = json;
+        }
+      } catch (_) {}
     }
-    savePrefs();
-    renderAll();
-    if (!silent) {
-      const activeWk = weeks.find(w => w.weekId === state.selectedWeekId);
-      announceSR(`Speisepläne aktualisiert. Kalenderwoche ${activeWk ? activeWk.kw : ''} wird angezeigt.`, 'assertive');
+
+    if (freshData) {
+      appData.canteen = freshData;
+      const allWeeksNow = getFullCanteenWeeksList(appData.canteen);
+      const smartWid = getSmartDefaultCanteenWeekId(allWeeksNow);
+      const curSelectedObj = allWeeksNow.find(w => w.weekId === appData.selectedCanteenWeek);
+      if (!appData.selectedCanteenWeek || !window._canteenWeekManuallySelected || !curSelectedObj || !curSelectedObj.hasData) {
+        appData.selectedCanteenWeek = smartWid;
+      }
+      const activeKwLabel = String(appData.selectedCanteenWeek).replace(/^kw/i, '');
+      saveAppData();
+      renderCanteenView();
+      syncSettingsForm();
+      if (statusText) statusText.textContent = 'Aktuell (KW ' + activeKwLabel + ')';
+      if (!silent) {
+        const totalW = freshData.weeks.length;
+        const successMsg = `Mensa-Speisepläne erfolgreich aktualisiert (${totalW} Wochen verfügbar. KW ${activeKwLabel} aktiv).`;
+        speak(successMsg, true);
+        announceSR(successMsg, 'assertive');
+      }
+      return true;
+    } else {
+      renderCanteenView();
+      if (statusText) statusText.textContent = 'Offline-Modus';
+      if (!silent) {
+        const warnMsg = 'Speisepläne konnten nicht neu aus dem Internet geladen werden. Gespeicherter Speiseplan wird verwendet.';
+        speak(warnMsg, true);
+        announceSR(warnMsg, 'assertive');
+      }
+      return false;
     }
-  } else {
-    renderAll();
-    if (!silent) {
-      announceSR('Offline-Modus: Gespeicherter Speiseplan wird angezeigt.', 'assertive');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span class="emoji-icon" aria-hidden="true">🔄 </span><strong>Aktualisieren (A)</strong>';
     }
   }
-
-  if (btn) btn.disabled = false;
 }
 
+// =============================================================================
+// 5. INITIALISIERUNG & TASTATURKÜRZEL (1, 2, A, V WIE IM STUNDENPLAN)
+// =============================================================================
 async function initApp() {
-  loadPrefs();
-  applyAppearance();
+  loadAppData();
+  applySettings();
+  syncSettingsForm();
 
-  // Sofort lokalen Seed laden, damit ohne Verzögerung etwas sichtbar ist
-  if (!state.canteen) {
+  // Tastaturkürzel wie im Stundenplan
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    if (e.key === '1') {
+      e.preventDefault();
+      switchTab('canteen');
+    } else if (e.key === '2') {
+      e.preventDefault();
+      switchTab('settings');
+    } else if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault();
+      refreshCanteenData(false);
+    } else if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault();
+      readCanteenSummary();
+    }
+  });
+
+  if (!appData.canteen) {
     try {
       const seed = await fetchJsonSafe('canteen_seed.json');
       if (seed && Array.isArray(seed.weeks)) {
-        state.canteen = seed;
+        appData.canteen = seed;
       }
     } catch (_) {}
   }
-  renderAll();
 
-  // Im Hintergrund sofort den neuesten Live-Stand laden
-  refreshCanteenPlans(true);
+  renderCanteenView();
+  syncSettingsForm();
+
+  // Im Hintergrund live aktualisieren
+  refreshCanteenData(true);
 }
 
 document.addEventListener('DOMContentLoaded', initApp);
